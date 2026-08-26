@@ -41,6 +41,7 @@
   let fullscreen = $state(false)
   let speaking = $state(false)
   let volume = $state(1)
+  let streamAudioTrack = $state<MediaStreamTrack | null>(null)
 
   onMount(() => {
     document.addEventListener("fullscreenchange", updateFullscreenState)
@@ -56,8 +57,23 @@
 
   $effect(() => {
     const currentStream = stream
-    const currentVoiceTrack = voiceTrack ?? currentStream?.getAudioTracks()[0] ?? null
-    if (screenOnly || !currentVoiceTrack) {
+    if (!currentStream) {
+      streamAudioTrack = null
+      return
+    }
+    const sync = () => { streamAudioTrack = currentStream.getAudioTracks()[0] ?? null }
+    sync()
+    currentStream.addEventListener("addtrack", sync)
+    currentStream.addEventListener("removetrack", sync)
+    return () => {
+      currentStream.removeEventListener("addtrack", sync)
+      currentStream.removeEventListener("removetrack", sync)
+    }
+  })
+
+  $effect(() => {
+    const currentVoiceTrack = voiceTrack ?? streamAudioTrack
+    if (!currentVoiceTrack) {
       speaking = false
       return
     }
