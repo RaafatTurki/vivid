@@ -85,12 +85,9 @@ export class CallEngine {
   private joinSound: HTMLAudioElement | null = null
   private cameraTrack: MediaStreamTrack | null = null
   private displayTrack: MediaStreamTrack | null = null
-  private mixedAudioTrack: MediaStreamTrack | null = null
   processedAudioTrack = $state<MediaStreamTrack | null>(null)
   private noiseSuppression: NoiseSuppression | null = null
   private noiseSuppressionLoad: Promise<NoiseSuppression> | null = null
-  private screenAudioContext: AudioContext | null = null
-  private screenAudioNodes: AudioNode[] = []
 
   private readonly hooks: CallEngineHooks
   private username = ""
@@ -358,7 +355,7 @@ export class CallEngine {
     this.peers.set(peerID, peer)
 
     for (const track of stream.getTracks()) {
-      const outboundTrack = track.kind === "audio" ? this.mixedAudioTrack || this.processedAudioTrack || track : track
+      const outboundTrack = track.kind === "audio" ? this.processedAudioTrack || track : track
       const sender = connection.addTrack(outboundTrack, stream)
       if (track.kind === "video") peer.cameraSender = sender
       if (track.kind === "audio") peer.microphoneSender = sender
@@ -371,6 +368,8 @@ export class CallEngine {
     }
     if (this.screenSharing && this.displayStream && this.displayTrack) {
       peer.screenSenders = [connection.addTrack(this.displayTrack, this.displayStream)]
+      const screenAudioTrack = this.displayStream.getAudioTracks()[0]
+      if (screenAudioTrack) peer.screenSenders.push(connection.addTrack(screenAudioTrack, this.displayStream))
     }
 
     connection.addEventListener("icecandidate", ({ candidate }) => {
@@ -621,8 +620,7 @@ export class CallEngine {
       track.enabled = true
       if (this.noiseCancellationEnabled) await this.updateNoiseCancellation(track)
       this.localStream = new MediaStream([track, ...this.localStream.getVideoTracks()])
-      await this.swapTrack("audio", this.mixedAudioTrack || this.processedAudioTrack || track, this.localStream)
-      if (this.screenSharing && this.displayStream) await this.startScreenAudioMix(this.displayStream)
+      await this.swapTrack("audio", this.processedAudioTrack || track, this.localStream)
       this.microphoneMuted = false
       this.broadcastPeerState()
       await this.refreshMediaDevices()
@@ -742,17 +740,13 @@ export class CallEngine {
       oldTrack = this.localStream.getAudioTracks()[0]
       newTrack.enabled = oldTrack?.enabled ?? true
       if (this.noiseCancellationEnabled) await this.updateNoiseCancellation(newTrack)
-      if (this.mixedAudioTrack) await this.stopScreenAudioMix(false)
       this.localStream = new MediaStream([newTrack, ...this.localStream.getVideoTracks()])
 
-      let mixed = false
-      if (this.screenSharing && this.displayStream) mixed = await this.startScreenAudioMix(this.displayStream)
-      if (!mixed) await this.swapTrack("audio", this.processedAudioTrack || newTrack, this.localStream)
+      await this.swapTrack("audio", this.processedAudioTrack || newTrack, this.localStream)
       oldTrack?.stop()
       this.selectedAudioDeviceID = newTrack.getSettings().deviceId || deviceID
       await this.refreshMediaDevices()
     } catch (error) {
-      if (this.mixedAudioTrack) await this.stopScreenAudioMix(false)
       if (newTrack && this.localStream?.getTracks().includes(newTrack)) {
         await this.swapTrack("audio", newTrack, this.localStream).catch(() => {})
         oldTrack?.stop()
@@ -806,14 +800,11 @@ export class CallEngine {
       this.noiseSuppression = null
     }
     this.broadcastPeerState()
-    if (this.screenSharing && this.displayStream) await this.startScreenAudioMix(this.displayStream)
-    else {
-      await this.swapTrack(
-        "audio",
-        this.noiseCancellationEnabled ? this.processedAudioTrack : this.localStream?.getAudioTracks()[0] || null,
-        this.localStream!,
-      )
-    }
+    await this.swapTrack(
+      "audio",
+      this.noiseCancellationEnabled ? this.processedAudioTrack : this.localStream?.getAudioTracks()[0] || null,
+      this.localStream!,
+    )
   }
 
   private async updateNoiseCancellation(track = this.localStream?.getAudioTracks()[0] || null): Promise<void> {
@@ -880,13 +871,14 @@ export class CallEngine {
       this.displayTrack = track
       this.screenSharing = true
       track.onended = () => this.stopScreenShare()
-      const hasScreenAudio = await this.startScreenAudioMix(sharedStream)
+      const screenAudioTrack = sharedStream.getAudioTracks()[0] || null
       for (const peer of this.peers.values()) {
         peer.screenSenders = [peer.connection.addTrack(track, sharedStream)]
+        if (screenAudioTrack) peer.screenSenders.push(peer.connection.addTrack(screenAudioTrack, sharedStream))
       }
       this.broadcastPeerState()
       await this.renegotiatePeers()
-      if (!hasScreenAudio) {
+      if (!screenAudioTrack) {
         this.setCameraError("This browser did not provide screen audio. Enable ‘Share audio’ in the sharing dialog if available.")
       }
     } catch (error) {
@@ -895,7 +887,6 @@ export class CallEngine {
         peer.screenSenders = []
       }
       for (const sharedTrack of sharedStream?.getTracks() || []) sharedTrack.stop()
-      await this.stopScreenAudioMix()
       this.displayTrack = null
       this.displayStream = null
       this.screenSharing = false
@@ -918,7 +909,6 @@ export class CallEngine {
     if (track) track.onended = null
 
     try {
-      await this.stopScreenAudioMix()
       for (const peer of this.peers.values()) {
         for (const sender of peer.screenSenders) peer.connection.removeTrack(sender)
         peer.screenSenders = []
@@ -932,55 +922,6 @@ export class CallEngine {
       this.sharingScreen = false
     }
   }
-
-  private async startScreenAudioMix(sharedStream: MediaStream): Promise<boolean> {
-    const microphoneTrack = this.processedAudioTrack || this.localStream?.getAudioTracks()[0]
-    const screenAudioTrack = sharedStream.getAudioTracks()[0]
-    if (!screenAudioTrack) return false
-
-    const AudioContextClass = window.AudioContext || window.webkitAudioContext
-    if (!AudioContextClass) return false
-
-    const context = new AudioContextClass()
-    const destination = context.createMediaStreamDestination()
-    const screenSource = context.createMediaStreamSource(new MediaStream([screenAudioTrack]))
-    screenSource.connect(destination)
-    const microphoneSource = microphoneTrack
-      ? context.createMediaStreamSource(new MediaStream([microphoneTrack]))
-      : null
-    microphoneSource?.connect(destination)
-    await context.resume()
-
-    const track = destination.stream.getAudioTracks()[0]
-    if (!track) {
-      await context.close()
-      return false
-    }
-
-    this.screenAudioContext = context
-    this.screenAudioNodes = [microphoneSource, screenSource, destination].filter(
-      (node): node is MediaStreamAudioSourceNode | MediaStreamAudioDestinationNode => node !== null,
-    )
-    this.mixedAudioTrack = track
-    await this.swapTrack("audio", track, this.localStream!)
-    return true
-  }
-
-  private async stopScreenAudioMix(replaceSender = true): Promise<void> {
-    const microphoneTrack = this.processedAudioTrack || this.localStream?.getAudioTracks()[0] || null
-    if (replaceSender && this.mixedAudioTrack) {
-      await Promise.all([...this.peers.values()].map(peer => (
-        peer.microphoneSender?.replaceTrack(microphoneTrack)
-      )))
-    }
-    this.mixedAudioTrack?.stop()
-    this.mixedAudioTrack = null
-    this.screenAudioNodes = []
-    const context = this.screenAudioContext
-    this.screenAudioContext = null
-    await context?.close().catch(() => {})
-  }
-
 
   async refreshMediaDevices(): Promise<void> {
     try {
@@ -1032,19 +973,14 @@ export class CallEngine {
     if (this.localStream) {
       for (const track of this.localStream.getTracks()) track.stop()
     }
-    this.mixedAudioTrack?.stop()
-    this.screenAudioContext?.close().catch(() => {})
     this.processedAudioTrack?.stop()
     this.noiseSuppression?.stop().catch(() => {})
     this.localStream = null
     this.cameraTrack = null
     this.displayTrack = null
     this.displayStream = null
-    this.mixedAudioTrack = null
     this.processedAudioTrack = null
     this.noiseSuppression = null
-    this.screenAudioContext = null
-    this.screenAudioNodes = []
     this.chatMessages = []
     this.chatOpen = false
     this.unreadChatMessages = 0
