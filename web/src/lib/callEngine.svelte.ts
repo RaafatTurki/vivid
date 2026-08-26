@@ -86,7 +86,7 @@ export class CallEngine {
   private cameraTrack: MediaStreamTrack | null = null
   private displayTrack: MediaStreamTrack | null = null
   private mixedAudioTrack: MediaStreamTrack | null = null
-  private processedAudioTrack: MediaStreamTrack | null = null
+  processedAudioTrack = $state<MediaStreamTrack | null>(null)
   private noiseSuppression: NoiseSuppression | null = null
   private noiseSuppressionLoad: Promise<NoiseSuppression> | null = null
   private screenAudioContext: AudioContext | null = null

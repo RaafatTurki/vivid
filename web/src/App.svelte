@@ -246,6 +246,7 @@
       media={{
         localStream: engine.localStream,
         displayStream: engine.displayStream,
+        processedAudioTrack: engine.processedAudioTrack,
         microphoneMuted: engine.microphoneMuted,
         noiseCancellationEnabled: engine.noiseCancellationEnabled,
         cameraStopped: engine.cameraStopped,

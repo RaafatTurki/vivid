@@ -3,15 +3,18 @@ let context: AudioContext | null = null
 let timer: number | null = null
 const listeners = new Set<Listener>()
 
+const SPEAKING_THRESHOLD = .025
+const QUIET_TICKS_BEFORE_SILENT = 4
+
 function sample(): void {
   for (const listener of listeners) {
     listener.analyser.getFloatTimeDomainData(listener.samples)
     let sum = 0
     for (const value of listener.samples) sum += value * value
-    const next = Math.sqrt(sum / listener.samples.length) > .025
-      ? true
-      : listener.quietTicks++ < 3 ? listener.speaking : false
-    if (next) listener.quietTicks = 0
+    const loud = Math.sqrt(sum / listener.samples.length) > SPEAKING_THRESHOLD
+    if (loud) listener.quietTicks = 0
+    else listener.quietTicks++
+    const next = loud || (listener.speaking && listener.quietTicks < QUIET_TICKS_BEFORE_SILENT)
     if (next !== listener.speaking) { listener.speaking = next; listener.onChange(next) }
   }
 }

@@ -7,6 +7,7 @@
 
   interface Props {
     stream: MediaStream | null
+    voiceTrack?: MediaStreamTrack | null
     name: string
     device?: DeviceType
     microphoneMuted?: boolean
@@ -22,6 +23,7 @@
 
   let {
     stream,
+    voiceTrack = null,
     name,
     device = DeviceType.COMPUTER,
     microphoneMuted = false,
@@ -54,12 +56,13 @@
 
   $effect(() => {
     const currentStream = stream
-    if (!currentStream || screenOnly || currentStream.getAudioTracks().length === 0) {
+    const currentVoiceTrack = voiceTrack ?? currentStream?.getAudioTracks()[0] ?? null
+    if (screenOnly || !currentVoiceTrack) {
       speaking = false
       return
     }
 
-    return observeVoiceActivity(currentStream, value => speaking = value)
+    return observeVoiceActivity(new MediaStream([currentVoiceTrack]), value => speaking = value)
   })
 
   function updateFullscreenState() {

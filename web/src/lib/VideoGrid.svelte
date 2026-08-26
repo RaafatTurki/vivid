@@ -4,6 +4,7 @@
 
   interface Props {
     localStream: MediaStream | null
+    processedAudioTrack?: MediaStreamTrack | null
     username: string
     deviceType: DeviceType
     microphoneMuted: boolean
@@ -18,6 +19,7 @@
 
   let {
     localStream,
+    processedAudioTrack = null,
     username,
     deviceType,
     microphoneMuted,
@@ -32,7 +34,7 @@
 </script>
 
 <div class="grid">
-  <VideoTile stream={localStream} name={`${username} (You)`} device={deviceType} {microphoneMuted} {noiseCancellationEnabled} {cameraStopped} local mirrored={cameraFacing !== "environment"} />
+  <VideoTile stream={localStream} voiceTrack={processedAudioTrack} name={`${username} (You)`} device={deviceType} {microphoneMuted} {noiseCancellationEnabled} {cameraStopped} local mirrored={cameraFacing !== "environment"} />
   {#if screenSharing && displayStream}
     <VideoTile stream={displayStream} name="Your screen" screenSharing screenOnly local mirrored={false} />
   {/if}
