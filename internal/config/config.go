@@ -12,6 +12,9 @@ type Config struct {
 	TurnURLs          []string
 	TurnSharedSecret  string
 	TurnTTL           time.Duration
+	UmamiURL          string
+	UmamiWebsiteID    string
+	UmamiDomain       string
 }
 
 func FromEnv() (Config, error) {
@@ -27,6 +30,9 @@ func FromEnv() (Config, error) {
 		TurnURLs:          env.Strings("TURN_URLS", nil),
 		TurnSharedSecret:  env.String("TURN_SHARED_SECRET", ""),
 		TurnTTL:           env.Duration("TURN_TTL", 30*time.Minute),
+		UmamiURL:          env.String("UMAMI_URL", ""),
+		UmamiWebsiteID:    env.String("UMAMI_WEBSITE_ID", ""),
+		UmamiDomain:       env.String("UMAMI_DOMAIN", ""),
 	}
 
 	if err := env.Err(); err != nil {

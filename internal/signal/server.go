@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/raafat/vivid/internal/analytics"
 	"github.com/raafat/vivid/internal/config"
 )
 
@@ -24,18 +26,19 @@ const (
 )
 
 type Server struct {
-	cfg      config.Config
-	hub      *Hub
-	logger   *slog.Logger
-	upgrader websocket.Upgrader
-	now      func() time.Time
+	cfg       config.Config
+	hub       *Hub
+	logger    *slog.Logger
+	upgrader  websocket.Upgrader
+	now       func() time.Time
+	analytics *analytics.Client
 }
 
-func NewServer(cfg config.Config, hub *Hub, logger *slog.Logger) *Server {
+func NewServer(cfg config.Config, hub *Hub, logger *slog.Logger, analyticsClient *analytics.Client) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	s := &Server{cfg: cfg, hub: hub, logger: logger, now: time.Now}
+	s := &Server{cfg: cfg, hub: hub, logger: logger, now: time.Now, analytics: analyticsClient}
 	s.upgrader = websocket.Upgrader{
 		HandshakeTimeout: 5 * time.Second,
 		CheckOrigin:      s.originAllowed,
@@ -83,11 +86,14 @@ func (s *Server) websocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	joinedAt := s.now()
 	c := &client{
-		peerID: peerID,
-		roomID: roomID,
-		conn:   conn,
-		send:   make(chan ServerMessage, messageSize),
+		peerID:    peerID,
+		roomID:    roomID,
+		conn:      conn,
+		send:      make(chan ServerMessage, messageSize),
+		ip:        clientIP(r),
+		userAgent: r.Header.Get("User-Agent"),
 	}
 	iceServers := makeICEServers(s.cfg, peerID, s.now())
 	err = s.hub.Join(c, ServerMessage{
@@ -104,14 +110,32 @@ func (s *Server) websocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.logger.Info("peer connected", "room", roomID, "peer", peerID)
+	s.analytics.Track("Room Joined", c.ip, c.userAgent, "/call", map[string]any{"room": roomID})
 
 	go c.writePump(s.logger)
-	c.readPump(s.hub)
+	c.readPump(s.hub, s.analytics)
 
 	s.hub.Leave(c)
 	close(c.send)
 	_ = conn.Close()
 	s.logger.Info("peer disconnected", "room", roomID, "peer", peerID)
+	s.analytics.Track("Room Left", c.ip, c.userAgent, "/call", map[string]any{
+		"room":             roomID,
+		"duration_seconds": int(s.now().Sub(joinedAt).Seconds()),
+	})
+}
+
+func clientIP(r *http.Request) string {
+	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
+		if ip := strings.TrimSpace(strings.Split(forwarded, ",")[0]); ip != "" {
+			return ip
+		}
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }
 
 func (s *Server) originAllowed(r *http.Request) bool {
@@ -159,10 +183,20 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 }
 
 type client struct {
-	peerID string
-	roomID string
-	conn   *websocket.Conn
-	send   chan ServerMessage
+	peerID    string
+	roomID    string
+	conn      *websocket.Conn
+	send      chan ServerMessage
+	ip        string
+	userAgent string
+	lastState *peerStateFlags
+}
+
+type peerStateFlags struct {
+	MicrophoneMuted          bool `json:"microphoneMuted"`
+	NoiseCancellationEnabled bool `json:"noiseCancellationEnabled"`
+	CameraStopped            bool `json:"cameraStopped"`
+	ScreenSharing            bool `json:"screenSharing"`
 }
 
 func (c *client) trySend(message ServerMessage) bool {
@@ -174,7 +208,7 @@ func (c *client) trySend(message ServerMessage) bool {
 	}
 }
 
-func (c *client) readPump(hub *Hub) {
+func (c *client) readPump(hub *Hub, analyticsClient *analytics.Client) {
 	c.conn.SetReadLimit(readLimit)
 	_ = c.conn.SetReadDeadline(time.Now().Add(pongWait))
 	c.conn.SetPongHandler(func(string) error {
@@ -205,6 +239,9 @@ func (c *client) readPump(hub *Hub) {
 			c.trySend(ServerMessage{Type: "error", Code: "invalid-target", Message: "cannot relay a message to yourself"})
 			continue
 		}
+		if message.Type == messagePeerState {
+			c.trackFeatureUsage(analyticsClient, message.Payload)
+		}
 		if err := hub.Relay(c, message); err != nil {
 			code := "relay-failed"
 			if errors.Is(err, ErrPeerMissing) {
@@ -213,6 +250,34 @@ func (c *client) readPump(hub *Hub) {
 			c.trySend(ServerMessage{Type: "error", Code: code, Message: err.Error()})
 		}
 	}
+}
+
+func (c *client) trackFeatureUsage(analyticsClient *analytics.Client, payload json.RawMessage) {
+	var state peerStateFlags
+	if json.Unmarshal(payload, &state) != nil {
+		return
+	}
+	previous := c.lastState
+	c.lastState = &state
+	if previous == nil {
+		return
+	}
+
+	track := func(changed bool, onEvent, offEvent string, now bool) {
+		if !changed {
+			return
+		}
+		event := offEvent
+		if now {
+			event = onEvent
+		}
+		analyticsClient.Track(event, c.ip, c.userAgent, "/call", nil)
+	}
+
+	track(previous.MicrophoneMuted != state.MicrophoneMuted, "Mic Muted", "Mic Unmuted", state.MicrophoneMuted)
+	track(previous.CameraStopped != state.CameraStopped, "Camera Off", "Camera On", state.CameraStopped)
+	track(previous.ScreenSharing != state.ScreenSharing, "Screen Share Started", "Screen Share Stopped", state.ScreenSharing)
+	track(previous.NoiseCancellationEnabled != state.NoiseCancellationEnabled, "Noise Suppression On", "Noise Suppression Off", state.NoiseCancellationEnabled)
 }
 
 func (c *client) writePump(logger *slog.Logger) {

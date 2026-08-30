@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/raafat/vivid/internal/analytics"
 	"github.com/raafat/vivid/internal/config"
 	signaling "github.com/raafat/vivid/internal/signal"
 )
@@ -23,7 +24,9 @@ func main() {
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	hub := signaling.NewHub(cfg.MaxRoomPeers)
-	handler := signaling.NewServer(cfg, hub, logger)
+	analyticsClient := analytics.New(cfg, logger)
+	defer analyticsClient.Close()
+	handler := signaling.NewServer(cfg, hub, logger, analyticsClient)
 	server := &http.Server{
 		Addr:              cfg.Address,
 		Handler:           handler.Routes(),

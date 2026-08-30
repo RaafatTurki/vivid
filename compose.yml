@@ -16,6 +16,9 @@ services:
       TURN_URLS: "${TURN_URLS:-turn:turn.raafat.io:3478?transport=udp}"
       TURN_SHARED_SECRET: "${TURN_SHARED_SECRET:?Set TURN_SHARED_SECRET in the root .env file}"
       TURN_TTL: "${TURN_TTL:-30m}"
+      UMAMI_URL: "${UMAMI_URL:-}"
+      UMAMI_WEBSITE_ID: "${UMAMI_WEBSITE_ID:-}"
+      UMAMI_DOMAIN: "${UMAMI_DOMAIN:-}"
     ports:
       - "127.0.0.1:8080:8080"
     networks:
@@ -66,7 +69,43 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  umami_db:
+    container_name: vivid-umami-db
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: umami
+      POSTGRES_PASSWORD: "${UMAMI_DB_PASSWORD:?Set UMAMI_DB_PASSWORD in the root .env file}"
+    volumes:
+      - umami-db-data:/var/lib/postgresql/data
+    networks:
+      - umami
+    security_opt:
+      - no-new-privileges:true
+
+  umami:
+    container_name: vivid-umami
+    image: ghcr.io/umami-software/umami:postgresql-latest
+    restart: unless-stopped
+    depends_on:
+      - umami_db
+    environment:
+      APP_SECRET: "${UMAMI_APP_SECRET:?Set UMAMI_APP_SECRET in the root .env file}"
+      DATABASE_URL: "postgresql://postgres:${UMAMI_DB_PASSWORD:?Set UMAMI_DB_PASSWORD in the root .env file}@umami_db:5432/umami"
+    networks:
+      proxy:
+        aliases:
+          - umami
+      umami:
+    security_opt:
+      - no-new-privileges:true
+
 networks:
   proxy:
     external: true
     name: "${CADDY_NETWORK:-proxy}"
+  umami:
+    driver: bridge
+
+volumes:
+  umami-db-data:
