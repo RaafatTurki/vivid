@@ -36,6 +36,13 @@ export interface ChatMessage {
   own: boolean
 }
 
+const MAX_CHAT_CHARS = 4000
+const MAX_CHAT_BYTES = 16 << 10
+
+function isValidChatText(text: string): boolean {
+  return !!text && Array.from(text).length <= MAX_CHAT_CHARS && new TextEncoder().encode(text).length <= MAX_CHAT_BYTES
+}
+
 export interface CallEngineHooks {
   isOnCallPage: () => boolean
   onStatus?: (state: ConnectionStatus, text: string) => void
@@ -181,12 +188,10 @@ export class CallEngine {
 
   private async acquireCallMedia(): Promise<MediaStream> {
     if (!this.joinWithAudio && !this.joinWithVideo) return new MediaStream()
+    const audio = this.joinWithAudio ? createMicrophoneConstraints() : false
     return getUserMediaWithRetry(
-      {
-        audio: this.joinWithAudio ? createMicrophoneConstraints() : false,
-        video: this.joinWithVideo ? createVideoConstraints(this.cameraFacing) : false,
-      },
-      { audio: this.joinWithAudio ? createMicrophoneConstraints() : false, video: this.joinWithVideo },
+      { audio, video: this.joinWithVideo ? createVideoConstraints(this.cameraFacing) : false },
+      { audio, video: this.joinWithVideo },
     )
   }
 
@@ -490,18 +495,15 @@ export class CallEngine {
 
 
   sendChat(text: string): void {
-    if (this.socket?.readyState !== WebSocket.OPEN) return
-    if (!text || Array.from(text).length > 4000 || new TextEncoder().encode(text).length > 16 * 1024) return
+    if (this.socket?.readyState !== WebSocket.OPEN || !isValidChatText(text)) return
     const payload = { text, senderName: this.username, timestamp: Date.now() }
     this.sendSignal("chat-message", "", payload)
     this.appendChatMessage(this.selfPeerID, payload, false)
   }
 
   private appendChatMessage(senderID: string, payload: unknown, notify: boolean): void {
-    const text = typeof payload === "object" && payload !== null && "text" in payload && typeof payload.text === "string" ? payload.text : ""
-    const senderName = typeof payload === "object" && payload !== null && "senderName" in payload && typeof payload.senderName === "string" ? payload.senderName : "Guest"
-    const timestamp = typeof payload === "object" && payload !== null && "timestamp" in payload && typeof payload.timestamp === "number" ? payload.timestamp : Date.now()
-    if (!text || Array.from(text).length > 4000 || new TextEncoder().encode(text).length > 16 * 1024) return
+    const { text, senderName, timestamp } = payload as { text: string; senderName: string; timestamp: number }
+    if (!isValidChatText(text)) return
     this.chatMessages = [...this.chatMessages, { id: `${senderID}-${Date.now()}-${Math.random()}`, senderID, senderName, text, timestamp, own: senderID === this.selfPeerID }].slice(-500)
     if (notify && !this.chatOpen) {
       this.unreadChatMessages += 1
@@ -619,8 +621,8 @@ export class CallEngine {
       if (!this.localStream) throw new Error("The call is no longer active.")
       track.enabled = true
       if (this.noiseCancellationEnabled) await this.updateNoiseCancellation(track)
-      this.localStream = new MediaStream([track, ...this.localStream.getVideoTracks()])
-      await this.swapTrack("audio", this.processedAudioTrack || track, this.localStream)
+      const localStream = this.setLocalTrack("audio", track)
+      await this.swapTrack("audio", this.processedAudioTrack || track, localStream)
       this.microphoneMuted = false
       this.broadcastPeerState()
       await this.refreshMediaDevices()
@@ -643,9 +645,8 @@ export class CallEngine {
       if (!track) throw new Error("No camera was available.")
       if (!this.localStream) throw new Error("The call is no longer active.")
       track.enabled = true
-      this.localStream = new MediaStream([...this.localStream.getAudioTracks(), track])
+      await this.replaceVideoTrack(track)
       this.cameraTrack = track
-      await this.swapTrack("video", track, this.localStream)
       this.cameraFacing = this.trackFacing(track, this.cameraFacing)
       this.cameraStopped = false
       this.broadcastPeerState()
@@ -667,22 +668,21 @@ export class CallEngine {
     const wasEnabled = oldTrack.enabled
     let oldTrackStopped = false
 
+    const requestFacingStream = () => navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: createVideoConstraints(nextFacing, true),
+    })
+
     try {
       let cameraStream
       try {
-        cameraStream = await navigator.mediaDevices.getUserMedia({
-          audio: false,
-          video: createVideoConstraints(nextFacing, true),
-        })
+        cameraStream = await requestFacingStream()
       } catch (error) {
         const issue = asError(error)
         if (issue.name !== "NotReadableError" && issue.name !== "AbortError") throw error
         oldTrack.stop()
         oldTrackStopped = true
-        cameraStream = await navigator.mediaDevices.getUserMedia({
-          audio: false,
-          video: createVideoConstraints(nextFacing, true),
-        })
+        cameraStream = await requestFacingStream()
       }
 
       const newTrack = cameraStream.getVideoTracks()[0]
@@ -703,12 +703,16 @@ export class CallEngine {
   }
 
   private async replaceVideoTrack(newTrack: MediaStreamTrack): Promise<void> {
+    const localStream = this.setLocalTrack("video", newTrack)
+    await this.swapTrack("video", newTrack, localStream)
+  }
+
+  private setLocalTrack(kind: "audio" | "video", track: MediaStreamTrack): MediaStream {
     if (!this.localStream) throw new Error("The call is no longer active.")
-    this.localStream = new MediaStream([
-      ...this.localStream.getAudioTracks(),
-      newTrack,
-    ])
-    await this.swapTrack("video", newTrack, this.localStream)
+    this.localStream = kind === "audio"
+      ? new MediaStream([track, ...this.localStream.getVideoTracks()])
+      : new MediaStream([...this.localStream.getAudioTracks(), track])
+    return this.localStream
   }
 
   private async restoreCamera(facingMode: VideoFacingModeEnum, enabled: boolean): Promise<void> {
@@ -740,9 +744,9 @@ export class CallEngine {
       oldTrack = this.localStream.getAudioTracks()[0]
       newTrack.enabled = oldTrack?.enabled ?? true
       if (this.noiseCancellationEnabled) await this.updateNoiseCancellation(newTrack)
-      this.localStream = new MediaStream([newTrack, ...this.localStream.getVideoTracks()])
+      const localStream = this.setLocalTrack("audio", newTrack)
 
-      await this.swapTrack("audio", this.processedAudioTrack || newTrack, this.localStream)
+      await this.swapTrack("audio", this.processedAudioTrack || newTrack, localStream)
       oldTrack?.stop()
       this.selectedAudioDeviceID = newTrack.getSettings().deviceId || deviceID
       await this.refreshMediaDevices()
