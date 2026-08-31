@@ -182,7 +182,7 @@
     const saved = localStorage.getItem("vivid-signal-url")
     if (saved) return saved
     if (window.location.hostname === "raafat.io" || window.location.hostname.endsWith(".raafat.io")) {
-      return "wss://signal.raafat.io/v1/ws"
+      return "wss://api.vivid.raafat.io/v1/ws"
     }
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
     return `${protocol}//${window.location.hostname || "localhost"}:8080/v1/ws`
