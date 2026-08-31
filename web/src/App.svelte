@@ -103,7 +103,7 @@
 
   function leaveCall(): void {
     if (!engine) return
-    if (engine.peers.size === 0 && engine.chatMessages.length > 0) {
+    if (engine.peers.size === 0 && engine.chat.messages.length > 0) {
       leavePromptOpen = true
       return
     }
@@ -240,44 +240,11 @@
         peers: engine.peers,
         cameraError,
         onCopy: copyInviteLink,
-        onTogglePeerPlayback: engine.togglePeerPlayback.bind(engine),
+        onTogglePeerPlayback: (peerID: string) => engine!.togglePeerPlayback(peerID),
         onLeave: leaveCall,
       }}
-      media={{
-        localStream: engine.localStream,
-        displayStream: engine.displayStream,
-        processedAudioTrack: engine.processedAudioTrack,
-        microphoneMuted: engine.microphoneMuted,
-        noiseCancellationEnabled: engine.noiseCancellationEnabled,
-        cameraStopped: engine.cameraStopped,
-        cameraFacing: engine.cameraFacing,
-        screenSharing: engine.screenSharing,
-        audioDevices: engine.audioDevices,
-        videoDevices: engine.videoDevices,
-        selectedAudioDeviceID: engine.selectedAudioDeviceID,
-        selectedVideoDeviceID: engine.selectedVideoDeviceID,
-        switchingAudioDevice: engine.switchingAudioDevice,
-        switchingVideoDevice: engine.switchingVideoDevice,
-        canShareScreen: engine.canShareScreen,
-        sharingScreen: engine.sharingScreen,
-        canSwitchCamera: engine.canSwitchCamera,
-        switchingCamera: engine.switchingCamera,
-        onAudioDeviceChange: (id: string) => engine!.changeAudioDevice(id),
-        onVideoDeviceChange: (id: string) => engine!.changeVideoDevice(id),
-        onToggleMicrophone: () => engine!.toggleMicrophone(),
-        onToggleNoiseCancellation: () => engine!.toggleNoiseCancellation(),
-        onToggleCamera: () => engine!.toggleCamera(),
-        onToggleScreenShare: () => engine!.toggleScreenShare(),
-        onStartScreenShare: (frameRate: 30 | 60 | 120) => engine!.startScreenShare(frameRate),
-        onSwitchCamera: () => engine!.switchCamera(),
-      }}
-      chat={{
-        messages: engine.chatMessages,
-        open: engine.chatOpen,
-        unread: engine.unreadChatMessages,
-        onSend: (text: string) => engine!.sendChat(text),
-        onToggle: () => engine!.toggleChat(),
-      }}
+      media={engine.media}
+      chat={engine.chat}
     />
   {/if}
 </main>
@@ -295,7 +262,7 @@
 <style>
   .shell {
     width: min(var(--content-width), calc(100% - 2rem));
-    min-height: 100vh;
+    min-height: 100dvh;
     margin: 0 auto;
     padding: 2rem 0 6rem;
   }

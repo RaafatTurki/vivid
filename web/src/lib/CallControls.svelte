@@ -126,15 +126,4 @@
     gap: var(--space-1);
     align-items: center;
   }
-
-  @media (max-width: 47.5em) {
-    .controls { gap: var(--space-1); width: fit-content; padding: var(--space-2); justify-content: flex-start; }
-    :global(.ui-button) { flex: 0 0 auto; padding: 0 .625rem; font-size: .72rem; }
-  }
-
-  @media (max-width: 38.75em) {
-    .controls { width: fit-content; max-width: calc(100% - 0.25rem); justify-content: center; overflow-x: visible; }
-    :global(.ui-button) { width: var(--control-height); padding: 0; justify-content: center; }
-    :global(.ui-button span) { display: none; }
-  }
 </style>

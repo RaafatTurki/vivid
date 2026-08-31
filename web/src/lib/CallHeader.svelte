@@ -46,5 +46,6 @@
 
   @media (max-width: 47.5em) {
     header { align-items: stretch; flex-direction: column; }
+    header :global(.ui-button) { width: 100%; }
   }
 </style>

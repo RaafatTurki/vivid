@@ -20,6 +20,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    padding-top: env(safe-area-inset-top);
     padding-bottom: var(--space-4);
     border-bottom: 1px solid var(--line);
     text-transform: uppercase;

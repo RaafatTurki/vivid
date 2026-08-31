@@ -97,8 +97,4 @@
   @media (prefers-reduced-motion: reduce) {
     .waiting-ring { animation: none; }
   }
-
-  @media (max-width: 47.5em) {
-    .grid { grid-template-columns: minmax(0, 1fr); }
-  }
 </style>

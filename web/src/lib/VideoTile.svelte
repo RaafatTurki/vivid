@@ -19,6 +19,7 @@
     mirrored?: boolean
     locallyMuted?: boolean
     onToggleMute?: () => void
+    compact?: boolean
   }
 
   let {
@@ -35,6 +36,7 @@
     mirrored = local,
     locallyMuted = false,
     onToggleMute = () => {},
+    compact = false,
   }: Props = $props()
   let card: HTMLElement
   let video: HTMLVideoElement
@@ -98,7 +100,7 @@
   }
 </script>
 
-<article bind:this={card} class:local-card={local} class:remote-card={!local} class:mirrored class:screen-sharing={screenSharing} class:speaking class="video-card">
+<article bind:this={card} class:local-card={local} class:remote-card={!local} class:mirrored class:screen-sharing={screenSharing} class:speaking class:compact class="video-card">
   <video bind:this={video} use:mediaStream={stream} autoplay muted={local || locallyMuted} playsinline></video>
   <div class="video-meta" aria-label={`${device === DeviceType.MOBILE ? "Mobile" : "PC"}${microphoneMuted ? ", microphone muted" : ""}`}>
     {#if !screenOnly && microphoneMuted}
@@ -128,35 +130,37 @@
     {/if}
     <span>{name}</span>
   </div>
-  <div class="tile-actions">
-    <button
-      class="tile-fullscreen"
-      type="button"
-      aria-label={fullscreen ? `Exit fullscreen for ${name}` : `View ${name} fullscreen`}
-      aria-pressed={fullscreen}
-      onclick={toggleFullscreen}
-    >
-      {#if fullscreen}<Minimize2 aria-hidden="true" />{:else}<Maximize2 aria-hidden="true" />{/if}
-    </button>
-    {#if !local && !screenOnly}
-      <div class="audio-controls">
-        <label class="tile-volume" aria-label={`Volume for ${name}`}>
-          <Volume2 aria-hidden="true" />
-          <input bind:value={volume} style={`--volume-level: ${volume * 100}%`} type="range" min="0" max="1" step="0.05" disabled={locallyMuted}>
-          <span>{Math.round(volume * 100)}%</span>
-        </label>
-        <button
-          class="tile-mute"
-          type="button"
-          aria-pressed={locallyMuted}
-          aria-label={locallyMuted ? `Unmute ${name} for you` : `Mute ${name} for you`}
-          onclick={onToggleMute}
-        >
-          {#if locallyMuted}<VolumeX class="tile-mute-icon" aria-hidden="true" />{:else}<Volume2 class="tile-mute-icon" aria-hidden="true" />{/if}
-        </button>
-      </div>
-    {/if}
-  </div>
+  {#if !compact}
+    <div class="tile-actions">
+      <button
+        class="tile-fullscreen"
+        type="button"
+        aria-label={fullscreen ? `Exit fullscreen for ${name}` : `View ${name} fullscreen`}
+        aria-pressed={fullscreen}
+        onclick={toggleFullscreen}
+      >
+        {#if fullscreen}<Minimize2 aria-hidden="true" />{:else}<Maximize2 aria-hidden="true" />{/if}
+      </button>
+      {#if !local && !screenOnly}
+        <div class="audio-controls">
+          <label class="tile-volume" aria-label={`Volume for ${name}`}>
+            <Volume2 aria-hidden="true" />
+            <input bind:value={volume} style={`--volume-level: ${volume * 100}%`} type="range" min="0" max="1" step="0.05" disabled={locallyMuted}>
+            <span>{Math.round(volume * 100)}%</span>
+          </label>
+          <button
+            class="tile-mute"
+            type="button"
+            aria-pressed={locallyMuted}
+            aria-label={locallyMuted ? `Unmute ${name} for you` : `Mute ${name} for you`}
+            onclick={onToggleMute}
+          >
+            {#if locallyMuted}<VolumeX class="tile-mute-icon" aria-hidden="true" />{:else}<Volume2 class="tile-mute-icon" aria-hidden="true" />{/if}
+          </button>
+        </div>
+      {/if}
+    </div>
+  {/if}
 </article>
 
 <style>
@@ -374,4 +378,9 @@
   @media (max-width: 47.5em) {
     .video-card { min-height: clamp(10rem, 52vw, 14rem); }
   }
+
+  .video-card.compact { min-height: 0; aspect-ratio: 4 / 3; }
+  .video-card.compact .video-label { height: auto; padding: 0.1875rem 0.4375rem; font-size: 0.66rem; }
+  .video-card.compact .video-label :global(.device-icon) { display: none; }
+  .video-card.compact .video-badge { padding: 0.1875rem 0.375rem; }
 </style>

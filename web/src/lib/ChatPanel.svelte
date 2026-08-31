@@ -1,24 +1,18 @@
 <script lang="ts">
-  import { Send } from "@lucide/svelte"
+  import { Send, X } from "@lucide/svelte"
   import { tick } from "svelte"
   import Button from "./Button.svelte"
-
-  export interface ChatMessage {
-    id: string
-    senderID: string
-    senderName: string
-    text: string
-    timestamp: number
-    own: boolean
-  }
+  import type { ChatMessage } from "./call/chat.svelte"
 
   interface Props {
     messages: ChatMessage[]
     open: boolean
     onSend: (text: string) => void
+    variant?: "panel" | "sheet"
+    onClose?: () => void
   }
 
-  let { messages, open, onSend }: Props = $props()
+  let { messages, open, onSend, variant = "panel", onClose = () => {} }: Props = $props()
   let text = $state("")
   let messagesElement = $state<HTMLDivElement>()
 
@@ -44,8 +38,13 @@
 </script>
 
 {#if open}
-  <aside class="chat-panel" aria-label="Room chat">
-    <header><strong>Chat</strong><span>{messages.length} messages</span></header>
+  <aside class="chat-panel" class:sheet={variant === "sheet"} aria-label="Room chat">
+    <header>
+      <div class="chat-title"><strong>Chat</strong><span>{messages.length} messages</span></div>
+      {#if variant === "sheet"}
+        <Button size="icon" kind="ghost" aria-label="Close chat" onclick={onClose}><X aria-hidden="true" /></Button>
+      {/if}
+    </header>
     <div bind:this={messagesElement} class="messages" aria-live="polite">
       {#if messages.length === 0}<p class="empty">No messages yet.</p>{/if}
       {#each messages as message (message.id)}
@@ -65,8 +64,9 @@
 
 <style>
   .chat-panel { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; width: 100%; height: 40rem; max-height: 75vh; border: 1px solid var(--accent-border); border-radius: 2px; background: var(--surface); }
-  header { display: flex; justify-content: space-between; padding: var(--space-3); border-bottom: 1px solid var(--line-soft); }
+  header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3); border-bottom: 1px solid var(--line-soft); }
   header span { color: var(--muted); font-size: 0.72rem; }
+  .chat-title { display: flex; gap: var(--space-2); align-items: baseline; }
   .messages { overflow-y: auto; padding: var(--space-3); }
   article { width: fit-content; max-width: 90%; margin-bottom: var(--space-3); padding: 0.45rem 0.6rem; border: 1px solid var(--line-soft); background: var(--surface-faint); }
   article.own { border-color: var(--accent-border); background: var(--accent-subtle); }
@@ -76,5 +76,20 @@
   form { display: flex; gap: var(--space-2); padding: var(--space-3); border-top: 1px solid var(--line-soft); }
   input { min-width: 0; flex: 1; }
   time { margin-left: var(--space-2); color: var(--muted); font-size: 0.65rem; }
-  @media (max-width: 47.5em) { .chat-panel { position: static; width: 100%; height: min(28rem, 55vh); } }
+
+  .chat-panel.sheet {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    height: 100%;
+    max-height: 100dvh;
+    border: 0;
+    border-radius: 0;
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    animation: sheet-slide-up 200ms ease-out;
+  }
+
+  @keyframes sheet-slide-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
+  @media (prefers-reduced-motion: reduce) { .chat-panel.sheet { animation: none; } }
 </style>
