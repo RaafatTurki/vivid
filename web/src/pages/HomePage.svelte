@@ -1,13 +1,13 @@
 <script lang="ts">
   import { Lock, Monitor, Shield, Video, Zap } from "@lucide/svelte"
   import Logo from "../lib/Logo.svelte"
-  import { roomFromInput } from "../lib/utils"
+  import { checkRoomID, roomFromInput } from "../lib/utils"
 
   let { onNewMeeting, onOpenRoom }: { onNewMeeting: () => void; onOpenRoom: (roomID: string) => void } = $props()
 
   let code = $state("")
   let error = $state("")
-  const room = $derived(roomFromInput(code))
+  const room = $derived(checkRoomID(code) ? code : "")
 
   const features = [
     { icon: Shield, label: "Private by default" },
@@ -15,10 +15,30 @@
     { icon: Monitor, label: "Runs in the browser" },
   ]
 
+  const INVALID_CODE = "Room codes are 6 letters or numbers."
+
   function join(event: SubmitEvent) {
     event.preventDefault()
     if (room) onOpenRoom(room)
-    else error = "Enter a 6-character code or a Vivid link."
+    else error = INVALID_CODE
+  }
+
+  // Typing is limited to 6 letters/digits; pasting a full invite link drops in just its code.
+  function sanitize() {
+    code = code.replace(/[^A-Za-z0-9]/g, "").slice(0, 6)
+    error = ""
+  }
+
+  function paste(event: ClipboardEvent) {
+    const id = roomFromInput(event.clipboardData?.getData("text") ?? "")
+    if (!id) return
+    event.preventDefault()
+    code = id
+    error = ""
+  }
+
+  function validate() {
+    error = code.trim() && !room ? INVALID_CODE : ""
   }
 </script>
 
@@ -51,8 +71,11 @@
             id="code"
             class="field flex-1 font-mono text-sm aria-invalid:border-danger-ink/50"
             bind:value={code}
-            oninput={() => error = ""}
-            placeholder="Enter code or link"
+            maxlength={6}
+            oninput={sanitize}
+            onpaste={paste}
+            onblur={validate}
+            placeholder="Enter code or paste link"
             autocomplete="off"
             autocapitalize="off"
             spellcheck="false"

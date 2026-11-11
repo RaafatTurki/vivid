@@ -254,9 +254,9 @@
             style:grid-template-rows="repeat({Math.ceil((tiles.length + (remotes.length ? 0 : 1)) / columns)}, minmax(0, 1fr))"
           >
             {#each tiles as tile (tile.key)}
-              <VideoTile {...tileProps(tile)} />
+              <div class="tile-cell"><div><VideoTile {...tileProps(tile)} /></div></div>
             {/each}
-            {#if !remotes.length}{@render inviteCard()}{/if}
+            {#if !remotes.length}<div class="tile-cell">{@render inviteCard()}</div>{/if}
           </div>
         {/if}
       </section>

@@ -92,9 +92,18 @@ export function asError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error))
 }
 
+// Accepts a bare 6-character code or an invite link whose path is exactly that code.
 export function roomFromInput(value: string): string {
-  const match = value.trim().match(/(?:^|\/)([A-Za-z0-9]{6})\/?$/)
-  return match ? match[1] : ""
+  const input = value.trim()
+  if (checkRoomID(input)) return input
+  try {
+    const url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(input) ? input : `https://${input}`)
+    if (url.protocol !== "http:" && url.protocol !== "https:") return ""
+    const id = url.pathname.replace(/^\/|\/$/g, "")
+    return checkRoomID(id) ? id : ""
+  } catch {
+    return ""
+  }
 }
 
 export function initials(name: string): string {
