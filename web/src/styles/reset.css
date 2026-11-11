@@ -1,5 +1,0 @@
-* { box-sizing: border-box; }
-body, h1, h2, p { margin: 0; }
-button, input, select { font: inherit; }
-button { cursor: pointer; letter-spacing: .02em; }
-button:disabled { cursor: wait; opacity: .6; }

@@ -1,5 +1,3 @@
-import { DeviceType } from "./types"
-
 export function checkRoomID(id: string | null): id is string {
   if (id == null) return false
   return typeof id === "string" && /^[A-Za-z0-9]{6}$/.test(id)
@@ -23,14 +21,6 @@ export function cleanString(value: unknown) {
   if (typeof value !== "string") return ""
   return value.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 32)
 }
-
-export function detectDeviceType(): DeviceType {
-  if (navigator.userAgentData?.mobile) return DeviceType.MOBILE
-  if (/Android|iPhone|iPad|iPod|IEMobile|Opera Mini/i.test(navigator.userAgent)) return DeviceType.MOBILE
-  if (/Macintosh/i.test(navigator.userAgent) && navigator.maxTouchPoints > 1) return DeviceType.MOBILE
-  return DeviceType.COMPUTER
-}
-
 
 export function createVideoConstraints(facingMode: VideoFacingModeEnum, exact = false): MediaTrackConstraints {
   return {
@@ -60,7 +50,6 @@ export function createMicrophoneConstraints(deviceID = ""): MediaTrackConstraint
   }
 }
 
-
 export async function getUserMediaWithRetry(constraints: MediaStreamConstraints, relaxed: MediaStreamConstraints = constraints, retries = 1): Promise<MediaStream> {
   for (let attempt = 0; ; attempt++) {
     try {
@@ -74,7 +63,6 @@ export async function getUserMediaWithRetry(constraints: MediaStreamConstraints,
     }
   }
 }
-
 
 export function getMediaErrorMsg(error: unknown): string {
   const issue = asError(error)
@@ -100,7 +88,31 @@ export function getScreenShareErrorMsg(error: unknown): string {
   return issue.message || "Couldn't start screen sharing."
 }
 
-
 export function asError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error))
+}
+
+export function roomFromInput(value: string): string {
+  const match = value.trim().match(/(?:^|\/)([A-Za-z0-9]{6})\/?$/)
+  return match ? match[1] : ""
+}
+
+export function initials(name: string): string {
+  return name.trim().split(/\s+/).filter(Boolean).map(word => Array.from(word)[0]).join("").slice(0, 2).toUpperCase() || "?"
+}
+
+export function formatDuration(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000))
+  const h = Math.floor(total / 3600)
+  const m = Math.floor(total / 60) % 60
+  const s = String(total % 60).padStart(2, "0")
+  return h ? `${h}:${String(m).padStart(2, "0")}:${s}` : `${String(m).padStart(2, "0")}:${s}`
+}
+
+const TILE_COLORS = ["#1A2130", "#221B2A", "#1B2622", "#2A221B", "#1B2429", "#281B22"]
+
+export function tileColor(key: string): string {
+  let hash = 0
+  for (const char of key) hash = (hash * 31 + char.charCodeAt(0)) | 0
+  return TILE_COLORS[Math.abs(hash) % TILE_COLORS.length]
 }

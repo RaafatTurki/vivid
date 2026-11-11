@@ -1,195 +1,76 @@
 <script lang="ts">
-  import { Download, Mic, MicOff, RefreshCw, Video, VideoOff } from "@lucide/svelte"
-  import { createRoomID } from "../lib/utils"
-  import Button from "../lib/Button.svelte"
+  import { Lock, Monitor, Shield, Video, Zap } from "@lucide/svelte"
+  import Logo from "../lib/Logo.svelte"
+  import { roomFromInput } from "../lib/utils"
 
-  interface Props {
-    roomInput?: string
-    signalInput?: string
-    username?: string
-    joinWithAudio?: boolean
-    joinWithVideo?: boolean
-    joining: boolean
-    setupError: string
-    installHint?: string
-    onJoin: (event: SubmitEvent) => void | Promise<void>
-    onInstall?: () => void | Promise<void>
+  let { onNewMeeting, onOpenRoom }: { onNewMeeting: () => void; onOpenRoom: (roomID: string) => void } = $props()
+
+  let code = $state("")
+  let error = $state("")
+  const room = $derived(roomFromInput(code))
+
+  const features = [
+    { icon: Shield, label: "Private by default" },
+    { icon: Zap, label: "Instant rooms" },
+    { icon: Monitor, label: "Runs in the browser" },
+  ]
+
+  function join(event: SubmitEvent) {
+    event.preventDefault()
+    if (room) onOpenRoom(room)
+    else error = "Enter a 6-character code or a Vivid link."
   }
-
-  let {
-    roomInput = $bindable(),
-    signalInput = $bindable(),
-    username = $bindable(),
-    joinWithAudio = $bindable(),
-    joinWithVideo = $bindable(),
-    joining,
-    setupError,
-    installHint = "",
-    onJoin,
-    onInstall = () => {},
-  }: Props = $props()
 </script>
 
-<section aria-labelledby="setup-title">
-  <div>
-    <h1 id="setup-title">Simple <span>Secure</span> <strong>Vivid</strong></h1>
-    <p class="intro">Create a room, share its link, and talk directly from browser to browser.</p>
-    <p class="eyebrow">Private by design</p>
-    <div class="install-button">
-      <Button onclick={onInstall}>
-        <Download size={16} aria-hidden="true" />
-        Install web app
-      </Button>
-    </div>
-    {#if installHint}<p class="install-hint" role="status">{installHint}</p>{/if}
-  </div>
+<div class="flex min-h-dvh flex-col">
+  <header class="page-header max-xs:px-5">
+    <Logo />
+    <span class="flex items-center gap-2 text-caption text-muted"><Lock size={14} class="text-accent" />End-to-end encrypted</span>
+  </header>
 
-  <form onsubmit={onJoin} novalidate>
-    <div class="form-field">
-      <label for="nameInput">Your name</label>
-      <input class="ui-field" id="nameInput" bind:value={username} maxlength="32" autocomplete="name" placeholder="How others will see you" required>
-    </div>
-
-    <div class="form-field">
-      <label for="roomInput">Room ID</label>
-      <div class="room-entry">
-        <input class="ui-field" id="roomInput" bind:value={roomInput} maxlength="6" autocomplete="off" spellcheck="false" required>
-        <Button onclick={() => roomInput = createRoomID()}>
-          <RefreshCw size={17} aria-hidden="true" />
-          New room
-        </Button>
+  <main class="flex flex-1 items-center justify-center px-6 py-6 xs:py-12">
+    <div class="flex w-full max-w-110 flex-col gap-10">
+      <div class="flex flex-col gap-3">
+        <h1 class="text-[34px] leading-[1.1] font-semibold tracking-[-0.03em] xs:text-[40px]">Simple. Secure.<br />Vivid.</h1>
+        <p class="text-base leading-normal text-muted">Start a call in one click. No accounts, no downloads — just share the link.</p>
       </div>
+
+      <div class="flex flex-col gap-4">
+        <button type="button" class="btn btn-primary" onclick={onNewMeeting}><Video size={18} />New meeting</button>
+
+        <div
+          class="flex items-center gap-3 text-xs tracking-[0.08em] text-faint uppercase before:h-px before:flex-1 before:bg-line after:h-px after:flex-1 after:bg-line"
+          aria-hidden="true"
+        >
+          <span>or join</span>
+        </div>
+
+        <form class="flex gap-2" onsubmit={join} novalidate>
+          <label for="code" class="sr-only">Meeting code or link</label>
+          <input
+            id="code"
+            class="field flex-1 font-mono text-sm aria-invalid:border-danger-ink/50"
+            bind:value={code}
+            oninput={() => error = ""}
+            placeholder="Enter code or link"
+            autocomplete="off"
+            autocapitalize="off"
+            spellcheck="false"
+            aria-invalid={!!error}
+            aria-describedby={error ? "code-error" : undefined}
+          />
+          <button type="submit" class={["btn btn-secondary", room ? "text-ink" : "text-dim"]}>Join</button>
+        </form>
+        {#if error}<p id="code-error" class="-mt-1.5 text-caption text-danger-ink" role="alert">{error}</p>{/if}
+      </div>
+
+      <ul class="grid grid-cols-3 gap-2 border-t border-surface-2 pt-2">
+        {#each features as { icon: Icon, label } (label)}
+          <li class="flex flex-col gap-1.5 pt-4 text-caption text-ink-2"><Icon size={18} strokeWidth={1.8} class="text-muted" />{label}</li>
+        {/each}
+      </ul>
     </div>
+  </main>
 
-    <fieldset>
-      <legend>Join with</legend>
-      <button class="media-choice" type="button" aria-pressed={joinWithAudio} onclick={() => joinWithAudio = !joinWithAudio}>
-        {#if joinWithAudio}<Mic aria-hidden="true" />{:else}<MicOff aria-hidden="true" />{/if}
-        <span>Microphone {joinWithAudio ? "on" : "off"}</span>
-      </button>
-      <button class="media-choice" type="button" aria-pressed={joinWithVideo} onclick={() => joinWithVideo = !joinWithVideo}>
-        {#if joinWithVideo}<Video aria-hidden="true" />{:else}<VideoOff aria-hidden="true" />{/if}
-        <span>Camera {joinWithVideo ? "on" : "off"}</span>
-      </button>
-    </fieldset>
-
-    <details>
-      <summary>Connection settings</summary>
-      <label for="signalInput">Signaling WebSocket URL</label>
-      <input class="ui-field" id="signalInput" bind:value={signalInput} type="url" spellcheck="false" required>
-    </details>
-
-    <Button kind="primary" fullWidth type="submit" disabled={joining}>
-      {joining ? "Joining…" : "Join call"}
-    </Button>
-    {#if setupError}<p class="error" role="alert">{setupError}</p>{/if}
-  </form>
-</section>
-
-<style>
-  section {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(18rem, 1fr);
-    gap: clamp(3rem, 9vw, 8.125rem);
-    align-items: center;
-    min-height: calc(100svh - 6.25rem);
-  }
-
-  .eyebrow {
-    margin: 0 0 var(--space-3);
-    color: var(--accent);
-    font-size: 0.76rem;
-    font-weight: 800;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-  }
-
-  h1 {
-    max-width: 47.5rem;
-    margin: 0;
-    font-size: clamp(2.7rem, 7vw, 6.5rem);
-    line-height: 0.95;
-    letter-spacing: -0.045em;
-    font-weight: 500;
-  }
-
-  h1 span, h1 strong { display: block; font: inherit; }
-  h1 strong { color: var(--accent); }
-
-  .intro {
-    max-width: 36.875rem;
-    margin: 1.75rem 0 0;
-    color: var(--muted);
-    font-size: clamp(1rem, 2vw, 1.25rem);
-    line-height: 1.65;
-  }
-
-  .install-button { margin-top: var(--space-4); }
-  .install-hint { margin: var(--space-2) 0 0; color: var(--muted); font-size: 0.78rem; line-height: 1.5; }
-
-  form {
-    padding: clamp(1.25rem, 3vw, 1.75rem);
-    border: 1px solid var(--line-soft);
-    border-radius: 2px;
-    background: var(--surface);
-  }
-
-  label {
-    display: block;
-    margin-bottom: 0.5625rem;
-    color: var(--muted);
-    font-size: 0.84rem;
-    font-weight: 650;
-  }
-
-  .form-field + .form-field { margin-top: 1.125rem; }
-
-  .room-entry {
-    display: flex;
-    gap: var(--space-2);
-    align-items: center;
-  }
-
-  fieldset {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 0.5625rem;
-    margin: 1.25rem 0 0;
-    padding: 0;
-    border: 0;
-  }
-
-  legend { margin-bottom: 0.5625rem; color: var(--muted); font-size: 0.84rem; font-weight: 650; }
-
-  .media-choice {
-    display: flex;
-    gap: var(--space-2);
-    align-items: center;
-    height: var(--control-height);
-    min-height: var(--control-height);
-    padding: 0 0.6875rem;
-    border-color: var(--accent-border);
-    background: var(--accent-soft);
-    font-size: 0.78rem;
-    font-weight: 680;
-    white-space: nowrap;
-  }
-
-  .media-choice :global(svg) { width: 1rem; height: 1rem; }
-  .media-choice[aria-pressed="false"] { color: var(--danger); border-color: var(--danger-border); background: var(--danger-bg); }
-  details { margin-top: 1.25rem; color: var(--muted); font-size: 0.86rem; }
-  summary { margin-bottom: 0.9375rem; cursor: pointer; }
-  .error { margin: 0.9375rem 0 0; color: var(--danger); font-size: 0.86rem; line-height: 1.5; }
-
-  @media (max-width: 47.5em) {
-    section {
-      grid-template-columns: 1fr;
-      gap: clamp(2rem, 8vw, 2.625rem);
-      align-content: center;
-      padding: clamp(2.5rem, 10vh, 4rem) 0;
-    }
-
-    form { padding: clamp(1.125rem, 5vw, 1.5rem); }
-    .room-entry { align-items: stretch; flex-direction: column; }
-  }
-</style>
+  <footer class="px-8 py-5 text-xs text-faint max-xs:px-5">{window.location.host}</footer>
+</div>

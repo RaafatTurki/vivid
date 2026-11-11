@@ -5,27 +5,16 @@ import { MediaController } from "./call/media.svelte"
 import { ChatController } from "./call/chat.svelte"
 import { cleanString, getMediaErrorMsg } from "./utils"
 import type { PeerState } from "./types"
-import { ConnectionStatus, DeviceType } from "./types"
-
-export type { ChatMessage } from "./call/chat.svelte"
 
 export interface CallEngineHooks {
-  isOnCallPage: () => boolean
-  onStatus?: (state: ConnectionStatus, text: string) => void
-  onJoined?: () => void
-  onSetupError?: (message: string) => void
-  onCameraError?: (message: string) => void
-}
-
-export interface JoinOptions {
-  username: string
-  deviceType: DeviceType
-  joinWithAudio: boolean
-  joinWithVideo: boolean
+  onError: (message: string) => void
+  /** The server closed the socket before welcoming us (e.g. room full). */
+  onRejected: (reason: string) => void
 }
 
 export class CallEngine {
-  deviceType = $state<DeviceType>(DeviceType.COMPUTER)
+  /** Set when the signaling server welcomes us; used for the call timer. */
+  joinedAt = $state<number | null>(null)
 
   readonly media: MediaController
   readonly chat: ChatController
@@ -35,18 +24,17 @@ export class CallEngine {
   private selfPeerID = ""
   private iceServers: RTCIceServer[] = []
   private username = ""
-  private joinSound: HTMLAudioElement | null = null
+  private readonly joinSound = new Audio("/join.opus")
 
-  private readonly hooks: CallEngineHooks
-
-  constructor(hooks: CallEngineHooks) {
-    this.hooks = hooks
+  constructor(private readonly hooks: CallEngineHooks) {
+    this.joinSound.preload = "auto"
+    this.joinSound.volume = 0.65
 
     this.media = new MediaController({
       peers: () => this.peerManager.peers.values(),
       renegotiateAll: () => this.peerManager.renegotiateAll(),
       broadcastState: () => this.peerManager.broadcastState(),
-      setCameraError: (message) => this.setCameraError(message),
+      setCameraError: (message) => this.hooks.onError(message),
     })
 
     this.chat = new ChatController({
@@ -63,26 +51,21 @@ export class CallEngine {
       outboundAudioTrack: () => this.media.processedAudioTrack,
       screenShare: () => this.media.screenShare,
       username: () => this.username,
-      deviceType: () => this.deviceType,
       microphoneMuted: () => this.media.microphoneMuted,
       noiseCancellationEnabled: () => this.media.noiseCancellationEnabled,
       cameraStopped: () => this.media.cameraStopped,
       screenSharing: () => this.media.screenSharing,
       screenStreamID: () => this.media.displayStream?.id || "",
       sendSignal: (type, to, payload) => this.signaling.send(type, to, payload),
-      onPeerCountChanged: (totalInCall) => {
-        this.emitStatus(ConnectionStatus.CONNECTED, totalInCall ? `${totalInCall} people in call` : "Connected")
-      },
     })
 
     this.signaling = new Signaling({
       onMessage: (message) => this.handleMessage(message),
       onUnwelcomedClose: (reason) => {
-        this.closeConnections()
-        if (this.hooks.isOnCallPage()) this.hooks.onCameraError?.(reason)
-        else this.hooks.onSetupError?.(reason)
+        this.leaveRoom()
+        this.hooks.onRejected(reason)
       },
-      onStatusChange: (reason) => this.emitStatus(ConnectionStatus.ERROR, reason),
+      onStatusChange: (reason) => this.hooks.onError(reason),
     })
   }
 
@@ -90,83 +73,41 @@ export class CallEngine {
     return this.peerManager.peers
   }
 
-  prepareJoinSound(): void {
-    this.joinSound = new Audio("/join.opus")
-    this.joinSound.preload = "auto"
-    this.joinSound.volume = 0.65
-  }
-
-  destroyJoinSound(): void {
-    this.joinSound = null
-  }
-
-  async join(options: JoinOptions, signalInput: string, roomID: string): Promise<boolean> {
-    this.username = cleanString(options.username)
-    this.deviceType = options.deviceType
-
+  /** Connects to the room using the media already running from the lobby preview. */
+  async join(username: string, roomID: string): Promise<boolean> {
+    this.username = cleanString(username)
     if (!this.username) {
-      this.hooks.onSetupError?.("Enter your name before joining.")
+      this.hooks.onError("Enter your name before joining.")
       return false
     }
 
-    if (!/^[A-Za-z0-9]{6}$/.test(roomID)) {
-      this.hooks.onSetupError?.("Room IDs must be exactly 6 letters or numbers.")
-      return false
-    }
-
-    let signalURL: URL
+    this.leaveRoom()
     try {
-      signalURL = new URL(signalInput.trim())
-      if (signalURL.protocol !== "ws:" && signalURL.protocol !== "wss:") {
-        throw new Error("unsupported protocol")
-      }
-    } catch {
-      this.hooks.onSetupError?.("Enter a valid ws:// or wss:// signaling URL.")
-      return false
-    }
-
-    this.closeConnections()
-    this.setCameraError("")
-
-    this.emitStatus(ConnectionStatus.CONNECTING, "Preparing call")
-
-    try {
-      await this.media.startCall(options.joinWithAudio, options.joinWithVideo)
+      await this.media.startCall()
       this.chat.startCall()
-
-      signalURL.searchParams.set("room", roomID)
-      await this.signaling.open(signalURL)
-
-      this.hooks.onJoined?.()
-      this.emitStatus(ConnectionStatus.CONNECTING, "Joining room")
+      const url = new URL(signalURL())
+      url.searchParams.set("room", roomID)
+      await this.signaling.open(url)
       return true
     } catch (error) {
-      this.closeConnections()
-      this.emitStatus(ConnectionStatus.ERROR, "Could not join")
-      const message = getMediaErrorMsg(error)
-      if (this.hooks.isOnCallPage()) this.hooks.onCameraError?.(message)
-      else this.hooks.onSetupError?.(message)
+      this.leaveRoom()
+      this.hooks.onError(getMediaErrorMsg(error))
       return false
     }
   }
 
-  resetCallUI(): void {
-    this.selfPeerID = ""
-    this.media.resetUI()
-    this.setCameraError("")
-    this.emitStatus(ConnectionStatus.IDLE, "Ready to rejoin")
-  }
-
+  /** Ends the call and releases the camera and microphone. */
   close(): void {
-    this.closeConnections()
+    this.leaveRoom()
+    this.media.stop()
   }
 
-  togglePeerPlayback(peerID: string): void {
-    this.peerManager.togglePlayback(peerID)
-  }
-
-  async refreshMediaDevices(): Promise<void> {
-    await this.media.refreshDevices()
+  private leaveRoom(): void {
+    this.peerManager.closeAll()
+    this.signaling.close()
+    this.chat.reset()
+    this.selfPeerID = ""
+    this.joinedAt = null
   }
 
   private async handleMessage(message: SignalMessage): Promise<void> {
@@ -174,7 +115,7 @@ export class CallEngine {
       case "welcome":
         this.selfPeerID = message.peerId || ""
         this.iceServers = Array.isArray(message.iceServers) ? message.iceServers : []
-        this.emitStatus(ConnectionStatus.CONNECTED, "Connected")
+        this.joinedAt = Date.now()
         this.chat.receiveHistory(message.chatHistory ?? [])
         for (const peerID of message.peers ?? []) {
           this.peerManager.createPeer(peerID)
@@ -189,7 +130,8 @@ export class CallEngine {
         if (!message.peerId) break
         this.peerManager.createPeer(message.peerId)
         this.peerManager.sendState(message.peerId)
-        this.playJoinSound()
+        this.joinSound.currentTime = 0
+        this.joinSound.play().catch(() => {})
         break
       case "peer-state":
         if (message.from) this.peerManager.receiveState(message.from, message.payload as PeerState)
@@ -210,31 +152,16 @@ export class CallEngine {
         if (message.from) await this.peerManager.receiveCandidate(message.from, message.payload as RTCIceCandidateInit)
         break
       case "error":
-        this.emitStatus(ConnectionStatus.ERROR, message.message || "Signaling error")
+        this.hooks.onError(message.message || "Signaling error")
         break
       default:
         console.warn("Unknown signaling message", message)
     }
   }
+}
 
-  private emitStatus(state: ConnectionStatus, text: string): void {
-    this.hooks.onStatus?.(state, text)
-  }
-
-  private setCameraError(message: string): void {
-    this.hooks.onCameraError?.(message)
-  }
-
-  private playJoinSound(): void {
-    if (!this.joinSound) return
-    this.joinSound.currentTime = 0
-    this.joinSound.play().catch(() => {})
-  }
-
-  private closeConnections(): void {
-    this.peerManager.closeAll()
-    this.signaling.close()
-    this.media.stop()
-    this.chat.reset()
-  }
+function signalURL(): string {
+  const { hostname, protocol } = window.location
+  if (hostname === "raafat.io" || hostname.endsWith(".raafat.io")) return "wss://api.vivid.raafat.io/v1/ws"
+  return `${protocol === "https:" ? "wss:" : "ws:"}//${hostname || "localhost"}:8080/v1/ws`
 }

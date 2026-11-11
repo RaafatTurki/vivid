@@ -1,18 +1,7 @@
 export enum PageName {
   HOME = "home",
+  LOBBY = "lobby",
   CALL = "call",
-}
-
-export enum ConnectionStatus {
-  IDLE = "idle",
-  CONNECTING = "connecting",
-  CONNECTED = "connected",
-  ERROR = "error",
-}
-
-export enum DeviceType {
-  MOBILE = "mobile",
-  COMPUTER = "computer",
 }
 
 export interface MediaDeviceOption {
@@ -22,7 +11,6 @@ export interface MediaDeviceOption {
 
 export interface PeerState {
   name?: string
-  device?: DeviceType
   microphoneMuted?: boolean
   noiseCancellationEnabled?: boolean
   cameraStopped?: boolean
@@ -33,7 +21,6 @@ export interface PeerState {
 export interface Peer {
   id: string
   name: string
-  device: DeviceType
   microphoneMuted: boolean
   noiseCancellationEnabled: boolean
   cameraStopped: boolean
@@ -47,7 +34,6 @@ export interface Peer {
   cameraSender: RTCRtpSender | null
   microphoneSender: RTCRtpSender | null
   screenSenders: RTCRtpSender[]
-  locallyMuted: boolean
   renegotiate: boolean
   makingOffer: boolean
   ignoreOffer: boolean
@@ -56,10 +42,6 @@ export interface Peer {
 }
 
 declare global {
-  interface Navigator {
-    userAgentData?: { mobile?: boolean }
-  }
-
   interface Window {
     webkitAudioContext?: typeof AudioContext
   }

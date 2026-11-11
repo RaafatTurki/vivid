@@ -1,2 +1,0 @@
-.ui-field { width: 100%; min-width: 0; height: var(--control-height); padding: 0 .875rem; border: 1px solid var(--line-strong); border-radius: var(--radius); color: var(--ink); background: var(--bg); }
-.ui-field:focus { border-color: var(--accent); outline: none; }

@@ -85,26 +85,6 @@ func (e *envReader) Duration(name string, fallback time.Duration) time.Duration 
 	return parsed
 }
 
-func (e *envReader) Bool(name string, fallback bool) bool {
-	value, ok := os.LookupEnv(name)
-	if !ok || value == "" {
-		return fallback
-	}
-
-	parsed, err := strconv.ParseBool(value)
-	if err != nil {
-		e.errs = append(e.errs, fmt.Errorf(
-			"%s must be a boolean: %q",
-			name,
-			value,
-		))
-
-		return fallback
-	}
-
-	return parsed
-}
-
 func (e *envReader) Err() error {
 	return errors.Join(e.errs...)
 }

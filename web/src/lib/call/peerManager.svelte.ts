@@ -1,6 +1,5 @@
 import { SvelteMap } from "svelte/reactivity"
 import type { Peer, PeerState } from "../types"
-import { DeviceType } from "../types"
 import { cleanString } from "../utils"
 
 export interface PeerManagerContext {
@@ -10,14 +9,12 @@ export interface PeerManagerContext {
   outboundAudioTrack: () => MediaStreamTrack | null
   screenShare: () => { stream: MediaStream; track: MediaStreamTrack } | null
   username: () => string
-  deviceType: () => DeviceType
   microphoneMuted: () => boolean
   noiseCancellationEnabled: () => boolean
   cameraStopped: () => boolean
   screenSharing: () => boolean
   screenStreamID: () => string
   sendSignal: (type: string, to: string, payload: unknown) => void
-  onPeerCountChanged: (totalInCall: number) => void
 }
 
 export class PeerManager {
@@ -36,7 +33,6 @@ export class PeerManager {
     const peer: Peer = {
       id: peerID,
       name: `Guest ${peerID.slice(0, 6)}`,
-      device: DeviceType.COMPUTER,
       microphoneMuted: false,
       noiseCancellationEnabled: true,
       cameraStopped: false,
@@ -50,7 +46,6 @@ export class PeerManager {
       cameraSender: null,
       microphoneSender: null,
       screenSenders: [],
-      locallyMuted: false,
       renegotiate: false,
       makingOffer: false,
       ignoreOffer: false,
@@ -105,8 +100,6 @@ export class PeerManager {
     connection.addEventListener("connectionstatechange", () => {
       if (connection.connectionState === "failed" || connection.connectionState === "closed") {
         this.removePeer(peerID)
-      } else if (connection.connectionState === "connected") {
-        this.ctx.onPeerCountChanged(this.peers.size + 1)
       }
     })
 
@@ -118,7 +111,6 @@ export class PeerManager {
     if (!peer) return
     this.peers.delete(peerID)
     peer.connection.close()
-    this.ctx.onPeerCountChanged(this.peers.size ? this.peers.size + 1 : 0)
   }
 
   closeAll(): void {
@@ -185,17 +177,9 @@ export class PeerManager {
     for (const peerID of this.peers.keys()) await this.sendOffer(peerID)
   }
 
-  togglePlayback(peerID: string): void {
-    const peer = this.peers.get(peerID)
-    if (!peer) return
-    peer.locallyMuted = !peer.locallyMuted
-    this.peers.set(peerID, { ...peer })
-  }
-
   sendState(peerID: string): void {
     this.ctx.sendSignal("peer-state", peerID, {
       name: this.ctx.username(),
-      device: this.ctx.deviceType(),
       microphoneMuted: this.ctx.microphoneMuted(),
       noiseCancellationEnabled: this.ctx.noiseCancellationEnabled(),
       cameraStopped: this.ctx.cameraStopped(),
@@ -211,7 +195,6 @@ export class PeerManager {
   receiveState(peerID: string, state: PeerState): void {
     const peer = this.createPeer(peerID)
     peer.name = cleanString(state?.name) || peer.name
-    peer.device = state?.device === DeviceType.MOBILE ? DeviceType.MOBILE : DeviceType.COMPUTER
     peer.microphoneMuted = state?.microphoneMuted === true
     peer.noiseCancellationEnabled = state?.noiseCancellationEnabled !== false
     peer.cameraStopped = state?.cameraStopped === true

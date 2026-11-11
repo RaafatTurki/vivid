@@ -3,6 +3,7 @@ import {
   asError,
   createCameraConstraints,
   getCameraErrorMsg,
+  getMediaErrorMsg,
   getScreenShareErrorMsg,
   getUserMediaWithRetry,
   createMicrophoneConstraints,
@@ -42,8 +43,6 @@ export class MediaController {
   private noiseSuppression: NoiseSuppression | null = null
   private noiseSuppressionLoad: Promise<NoiseSuppression> | null = null
   private generation = 0
-  private joinWithAudio = true
-  private joinWithVideo = true
 
   constructor(private readonly ctx: MediaContext) {}
 
@@ -53,25 +52,35 @@ export class MediaController {
       : null
   }
 
-  async startCall(joinWithAudio: boolean, joinWithVideo: boolean): Promise<MediaStream> {
-    this.joinWithAudio = joinWithAudio
-    this.joinWithVideo = joinWithVideo
-    this.generation += 1
-    this.localStream = await this.acquireCallMedia()
-    await this.updateNoiseCancellation()
-    this.cameraTrack = this.localStream.getVideoTracks()[0] || null
-    this.microphoneMuted = !joinWithAudio
-    this.cameraStopped = !joinWithVideo
-    this.cameraFacing = this.trackFacing(this.localStream.getVideoTracks()[0], this.cameraFacing)
+  // Grabs camera + mic for the lobby preview. The same stream carries into the call.
+  async startPreview(): Promise<void> {
+    if (this.localStream) return
+    const generation = ++this.generation
+    let stream: MediaStream
+    try {
+      stream = await getUserMediaWithRetry(
+        { audio: createMicrophoneConstraints(), video: createVideoConstraints(this.cameraFacing) },
+        { audio: true, video: true },
+      )
+    } catch (error) {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: createMicrophoneConstraints() }).catch(() => new MediaStream())
+      this.ctx.setCameraError(getMediaErrorMsg(error))
+    }
+    if (generation !== this.generation) {
+      for (const track of stream.getTracks()) track.stop()
+      return
+    }
+    this.localStream = stream
+    this.cameraTrack = stream.getVideoTracks()[0] || null
+    this.microphoneMuted = stream.getAudioTracks().length === 0
+    this.cameraStopped = !this.cameraTrack
+    this.cameraFacing = this.trackFacing(this.cameraTrack ?? undefined, this.cameraFacing)
     await this.refreshDevices()
-    return this.localStream
   }
 
-  resetUI(): void {
-    this.microphoneMuted = false
-    this.cameraStopped = false
-    this.screenSharing = false
-    this.sharingScreen = false
+  async startCall(): Promise<void> {
+    await this.startPreview()
+    await this.updateNoiseCancellation()
   }
 
   stop(): void {
@@ -93,15 +102,8 @@ export class MediaController {
     this.noiseSuppression = null
     this.screenSharing = false
     this.sharingScreen = false
-  }
-
-  private async acquireCallMedia(): Promise<MediaStream> {
-    if (!this.joinWithAudio && !this.joinWithVideo) return new MediaStream()
-    const audio = this.joinWithAudio ? createMicrophoneConstraints() : false
-    return getUserMediaWithRetry(
-      { audio, video: this.joinWithVideo ? createVideoConstraints(this.cameraFacing) : false },
-      { audio, video: this.joinWithVideo },
-    )
+    this.microphoneMuted = false
+    this.cameraStopped = false
   }
 
   private async swapTrack(
@@ -373,12 +375,11 @@ export class MediaController {
   }
 
   async toggleScreenShare(): Promise<void> {
-    if (this.screenSharing) {
-      await this.stopScreenShare()
-    }
+    if (this.screenSharing) await this.stopScreenShare()
+    else await this.startScreenShare()
   }
 
-  async startScreenShare(frameRate: 30 | 60 | 120): Promise<void> {
+  private async startScreenShare(): Promise<void> {
     if (!this.canShareScreen || this.sharingScreen || !this.localStream) return
     this.sharingScreen = true
     this.ctx.setCameraError("")
@@ -391,7 +392,7 @@ export class MediaController {
         systemAudio: "include"
         windowAudio: "system"
       } = {
-        video: { frameRate: { ideal: frameRate, max: frameRate } },
+        video: { frameRate: { ideal: 30, max: 60 } },
         audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
         systemAudio: "include",
         windowAudio: "system",
